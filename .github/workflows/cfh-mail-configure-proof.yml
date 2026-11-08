@@ -106,12 +106,15 @@ jobs:
           export MOZBUILD_STATE_PATH=/d/mozbuild-cfh
           ./mach --no-interactive bootstrap --application-choice browser --no-system-changes
           ./mach configure
+          touch /d/cfh-configure-done
           "@
           $script = $script -replace "`r",''
           [IO.File]::WriteAllText('D:\cfh-configure.sh',$script,[Text.UTF8Encoding]::new($false))
-          & 'C:\mozilla-build\start-shell.bat' -c 'bash /d/cfh-configure.sh'
+          & 'C:\mozilla-build\start-shell.bat' -no-start -defterm -c 'bash /d/cfh-configure.sh'
           if ($LASTEXITCODE -ne 0) { throw "Bootstrap/configure failed: $LASTEXITCODE" }
-          Write-Host 'Configure completed; no application executable was launched.'
+          if (-not (Test-Path 'D:\cfh-shell-started')) { throw 'MozillaBuild command did not start' }
+          if (-not (Test-Path 'D:\cfh-configure-done')) { throw 'Configure did not complete' }
+          Write-Host 'Configure command completed; no application executable was launched.'
       - name: Check generated identity and disablement; do not launch
         shell: pwsh
         run: |
