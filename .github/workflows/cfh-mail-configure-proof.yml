@@ -101,6 +101,7 @@ jobs:
           $root = $env:SOURCE_ROOT.Replace('\','/') -replace '^D:','/d'
           $script = @"
           set -euo pipefail
+          touch /d/cfh-shell-started
           cd '$root'
           export MOZCONFIG="`$PWD/comm/cfh-build/mozconfig"
           export MOZBUILD_STATE_PATH=/d/mozbuild-cfh
