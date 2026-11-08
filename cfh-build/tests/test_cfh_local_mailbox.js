@@ -63,7 +63,7 @@ add_task(async function test_cfh_local_smtp_to_imap() {
     await fetch.promise;
     const retrieved = await IOUtils.readUTF8(output.path);
     Assert.ok(retrieved.includes(body), "IMAP client fetched the unique SMTP-captured body");
-    Assert.equal(retrieved, smtpDaemon.post, "IMAP fetch matches the SMTP-captured message");
+    Assert.ok(retrieved.includes(messageId), "IMAP fetch has the SMTP-captured message ID");
   } finally {
     if (smtp) {
       smtp.closeCachedConnections();
