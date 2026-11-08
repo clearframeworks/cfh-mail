@@ -1,0 +1,26 @@
+name: CFH Mail remote build preflight
+on:
+  push:
+    branches: [cfh-mail-159]
+    paths: [.github/workflows/cfh-mail-preflight.yml]
+permissions: {}
+jobs:
+  preflight:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Inspect runner prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw 'Visual Studio discovery is unavailable' }
+          & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0) { throw 'Visual Studio C++ tools not found' }
+          Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | Select-Object DeviceID, @{Name='FreeGiB';Expression={[Math]::Round($_.FreeSpace/1GB,1)}} | Format-Table
+          foreach ($command in @('git','python','rustc','cargo','clang')) {
+            $found = Get-Command $command -ErrorAction SilentlyContinue
+            if ($found) { Write-Host "$command available: $($found.Source)" } else { Write-Host "$command not on PATH" }
+          }
+          if (Test-Path 'C:\mozilla-build\start-shell.bat') { Write-Host 'MozillaBuild shell present' } else { Write-Host 'MozillaBuild shell not present' }
+          Write-Host 'This preflight does not download source, install tools, or build software.'
