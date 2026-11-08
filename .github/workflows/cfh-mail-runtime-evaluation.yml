@@ -1,0 +1,231 @@
+name: CFH Mail fresh-profile evaluation
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  configure:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Verify official source and toolchain on disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = 'D:\tb-source.tar.xz'
+          curl.exe --fail --location --retry 2 --max-time 1200 -o $archive 'https://archive.mozilla.org/pub/thunderbird/releases/159.0/source/thunderbird-159.0.source.tar.xz'
+          if ($LASTEXITCODE -ne 0) { throw 'Source download failed' }
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b4cbc4e010deaa66a51a5c647586c8dc41579c136155fe8baa8253f7c8b3927e') { throw 'Source checksum mismatch' }
+      - name: Verify and install MozillaBuild on disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          curl.exe --fail --location --retry 2 -o $installer 'https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.2.1.exe'
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8ef5b3d2087e4867dc75bf19f5e62f12e917f518239415723cc70896b6f1e3d8') { throw 'MozillaBuild checksum mismatch' }
+      - name: Validate MozillaBuild signature
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          $sig = Get-AuthenticodeSignature $installer
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Mozilla Corporation') { throw 'MozillaBuild signature mismatch' }
+      - name: Install verified MozillaBuild
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          $p = Start-Process $installer -ArgumentList '/S' -PassThru
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; throw 'MozillaBuild installer exceeded 3 minutes' }
+          if ($p.ExitCode -ne 0) { throw 'MozillaBuild install failed' }
+      - name: Check out exact official platform and mail revisions
+        timeout-minutes: 60
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:GIT_TERMINAL_PROMPT = '0'
+          $platform = '9a2dc53c369c7ae5172018b35988e1d2ffeff402'
+          $comm = 'f88f34886f667703f55095f2ede6f31b15b42116'
+          $root = 'D:\src'
+          git init -q $root
+          if ($LASTEXITCODE -ne 0) { throw 'Platform git init failed' }
+          git -C $root config core.longpaths true
+          git -C $root fetch --no-tags --depth=1 https://github.com/mozilla-firefox/firefox.git $platform
+          if ($LASTEXITCODE -ne 0) { throw 'Platform fetch failed' }
+          git -C $root checkout --quiet --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0 -or (git -C $root rev-parse HEAD) -cne $platform) { throw 'Platform revision mismatch' }
+          $commdir = Join-Path $root 'comm'
+          git init -q $commdir
+          if ($LASTEXITCODE -ne 0) { throw 'Mail git init failed' }
+          git -C $commdir config core.longpaths true
+          git -C $commdir fetch --no-tags --depth=1 https://github.com/thunderbird/thunderbird-desktop.git $comm
+          if ($LASTEXITCODE -ne 0) { throw 'Mail fetch failed' }
+          git -C $commdir checkout --quiet --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0 -or (git -C $commdir rev-parse HEAD) -cne $comm) { throw 'Mail revision mismatch' }
+          $rev = Get-Content (Join-Path $commdir '.gecko_rev.yml') -Raw
+          if ($rev -notmatch '5add844c26613d7e4d84c799d6e23cf987b1240d' -or $rev -notmatch 'FIREFOX_159_0_BUILD1') { throw 'Thunderbird Gecko source binding mismatch' }
+          Write-Host "Exact official Git revisions: platform=$platform comm=$comm"
+          Write-Host 'The independently verified release tarball identifies the same platform tag; whole-tree byte comparison is not asserted.'
+          "SOURCE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Overlay pinned CFH candidate with git blob verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sha = '6e016670a8565fb2337910872b3c5b482b58be81'
+          $manifest = Invoke-RestMethod -Uri "https://api.github.com/repos/clearframeworks/cfh-mail/git/trees/${sha}?recursive=1" -Headers @{'User-Agent'='CFH-evaluation'}
+          if ($manifest.truncated) { throw 'Incomplete manifest' }
+          $items = @($manifest.tree | Where-Object { $_.type -eq 'blob' -and ($_.path.StartsWith('mail/branding/cfh/') -or $_.path -eq 'mail/moz.configure' -or $_.path -eq 'cfh-build/mozconfig') })
+          if ($items.Count -lt 50 -or @($items | Where-Object path -eq 'mail/moz.configure').Count -ne 1 -or @($items | Where-Object path -eq 'cfh-build/mozconfig').Count -ne 1) { throw 'Candidate manifest incomplete' }
+          foreach ($item in $items) {
+            if ($item.mode -ne '100644' -and $item.mode -ne '100755') { throw 'Unexpected file mode' }
+            $url = "https://raw.githubusercontent.com/clearframeworks/cfh-mail/$sha/$($item.path)"
+            $target = Join-Path (Join-Path $env:SOURCE_ROOT 'comm') $item.path
+            New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+            Invoke-WebRequest -Uri $url -OutFile $target -TimeoutSec 60
+            $bytes = [IO.File]::ReadAllBytes($target)
+            $prefix = [Text.Encoding]::ASCII.GetBytes("blob $($bytes.Length)`0")
+            $sha1 = [Security.Cryptography.SHA1]::Create()
+            $sha1.TransformBlock($prefix,0,$prefix.Length,$null,0) | Out-Null
+            $sha1.TransformFinalBlock($bytes,0,$bytes.Length) | Out-Null
+            $actual = [Convert]::ToHexString($sha1.Hash).ToLowerInvariant()
+            if ($actual -ne $item.sha) { throw "Git blob mismatch: $($item.path)" }
+          }
+          Write-Host "Verified candidate overlay files: $($items.Count)"
+          Add-Content -LiteralPath (Join-Path $env:SOURCE_ROOT 'comm\cfh-build\mozconfig') -Value "`nac_add_options --disable-debug-symbols"
+          Write-Host 'Experiment configuration adds --disable-debug-symbols after verifying original overlay.'
+      - name: Bootstrap and configure only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = $env:SOURCE_ROOT.Replace('\','/') -replace '^D:','/d'
+          $script = @"
+          set -euo pipefail
+          touch /d/cfh-shell-started
+          cd '$root'
+          export MOZCONFIG="`$PWD/comm/cfh-build/mozconfig"
+          export MOZBUILD_STATE_PATH=/d/mozbuild-cfh
+          ./mach --no-interactive bootstrap --application-choice browser --no-system-changes
+          ./mach configure
+          touch /d/cfh-configure-done
+          "@
+          $script = $script -replace "`r",''
+          [IO.File]::WriteAllText('D:\cfh-configure.sh',$script,[Text.UTF8Encoding]::new($false))
+          & 'C:\mozilla-build\start-shell.bat' -no-start -defterm -c 'bash /d/cfh-configure.sh'
+          if ($LASTEXITCODE -ne 0) { throw "Bootstrap/configure failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'D:\cfh-shell-started')) { throw 'MozillaBuild command did not start' }
+          if (-not (Test-Path 'D:\cfh-configure-done')) { throw 'Configure did not complete' }
+          Write-Host 'Configure command completed; no application executable was launched.'
+      - name: Check generated identity and disablement; do not launch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\config.status.json'
+          if (-not (Test-Path $path)) { throw 'Generated config.status.json missing' }
+          $config = Get-Content $path -Raw | ConvertFrom-Json
+          $sub = $config.substs
+          $expected = @{ OS_TARGET='WINNT'; MOZ_APP_NAME='cfhmail'; MOZ_APP_BASENAME='CFHMail'; MOZ_APP_PROFILE='CFHMail'; MOZ_APP_VENDOR='CFH'; MOZ_APP_ID='{ba236449-a015-40aa-af22-e5c237f7b606}'; MOZ_APPUPDATE_HOST='updates.invalid' }
+          foreach ($key in $expected.Keys) {
+            $actual = $sub.$key
+            if ($actual -cne $expected[$key]) { throw "Generated $key is '$actual'; expected '$($expected[$key])'" }
+            Write-Host "$key=$actual"
+          }
+          foreach ($key in @('MOZ_ENTERPRISE','MOZ_UPDATER','MOZ_PROFILE_MIGRATOR','MOZ_DEBUG_SYMBOLS')) {
+            foreach ($area in @($config.substs,$config.defines)) {
+              $v = $area.$key
+              if ($null -ne $v -and $v -ne '' -and $v -ne 0 -and $v -ne $false) { throw "$key was enabled in generated configuration" }
+            }
+            Write-Host "$key absent or disabled in generated config and defines"
+          }
+          $rustflags = @($sub.MOZ_RUST_DEFAULT_FLAGS) -join ' '
+          if ($rustflags -match 'debuginfo=2') { throw 'Full Rust debug information remains enabled' }
+          Write-Host "MOZ_RUST_DEFAULT_FLAGS=$rustflags"
+          Write-Host 'Configure checks only: no binary launched, no existing profile opened, no accounts or email used.'
+      - name: Build and package evaluation on disposable runner
+        timeout-minutes: 330
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = $env:SOURCE_ROOT.Replace('\','/') -replace '^D:','/d'
+          $script = @"
+          set -euo pipefail
+          touch /d/cfh-build-started
+          cd '$root'
+          export MOZCONFIG="`$PWD/comm/cfh-build/mozconfig"
+          export MOZBUILD_STATE_PATH=/d/mozbuild-cfh
+          export CARGO_BUILD_JOBS=1
+          ./mach build -j2
+          ./mach package
+          touch /d/cfh-build-complete
+          "@
+          $script = $script -replace "`r",''
+          [IO.File]::WriteAllText('D:\cfh-build.sh',$script,[Text.UTF8Encoding]::new($false))
+          & 'C:\mozilla-build\start-shell.bat' -no-start -defterm -c 'bash /d/cfh-build.sh'
+          if ($LASTEXITCODE -ne 0) { throw "Build/package shell failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'D:\cfh-build-started') -or -not (Test-Path 'D:\cfh-build-complete')) { throw 'Build/package did not complete' }
+      - name: Verify packaged metadata and prepare private evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\dist'
+          $ini = Join-Path $dist 'bin\application.ini'
+          if (-not (Test-Path $ini)) { throw 'Built application.ini missing' }
+          $iniText = Get-Content $ini -Raw
+          foreach ($line in @('(?m)^Vendor=CFH\s*$','(?m)^Name=CFHMail\s*$','(?m)^ID=\{ba236449-a015-40aa-af22-e5c237f7b606\}\s*$')) { if ($iniText -notmatch $line) { throw "Built app identity assertion failed: $line" } }
+          $packages = @(Get-ChildItem $dist -File | Where-Object { $_.Extension -in @('.zip','.exe','.msi','.msix') })
+          if ($packages.Count -eq 0) { throw 'No package or installer found' }
+          $out = 'D:\cfh-private-evidence'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item $ini (Join-Path $out 'application.ini')
+          Copy-Item (Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\config.status.json') (Join-Path $out 'config.status.json')
+          foreach ($p in $packages) { Copy-Item $p.FullName $out }
+          $records = @(Get-ChildItem $out -File | ForEach-Object { [ordered]@{name=$_.Name; bytes=$_.Length; sha256=(Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()} })
+          $provenance = [ordered]@{classification='Private unreleased evaluation; no secure update service'; upstreamRelease='Thunderbird 159.0'; signedReleaseTarSha256='b4cbc4e010deaa66a51a5c647586c8dc41579c136155fe8baa8253f7c8b3927e'; platformGit='9a2dc53c369c7ae5172018b35988e1d2ffeff402'; commGit='f88f34886f667703f55095f2ede6f31b15b42116'; cfhOverlayGit='6e016670a8565fb2337910872b3c5b482b58be81'; githubRun=$env:GITHUB_RUN_ID; gitToTarWholeTreeComparison='not performed'; bootstrapToolchainHashes='not fully inventoried'; buildConfiguration='original overlay plus --disable-debug-symbols'; buildConcurrency=2; cargoConcurrency=1; runtimeLaunch='not performed'; files=$records}
+          $provenance | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $out 'provenance.json')
+          Write-Host ($provenance | ConvertTo-Json -Depth 8 -Compress)
+          Write-Host 'Build artifacts remain only on this temporary runner and are not uploaded.'
+      - name: Disposable fresh-profile startup check
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\dist\bin\cfhmail.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Expected CFH Mail executable missing; no launch performed' }
+          $config = Get-Content (Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\config.status.json') -Raw | ConvertFrom-Json
+          foreach ($key in @('MOZ_ENTERPRISE','MOZ_UPDATER','MOZ_PROFILE_MIGRATOR')) {
+            foreach ($area in @($config.substs,$config.defines)) {
+              $v = $area.$key
+              if ($null -ne $v -and $v -ne '' -and $v -ne 0 -and $v -ne $false) { throw "$key unexpectedly enabled; no launch performed" }
+            }
+          }
+          $identity = Get-Content (Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\dist\bin\application.ini') -Raw
+          foreach ($line in @('(?m)^Vendor=CFH\s*$','(?m)^Name=CFHMail\s*$','(?m)^ID=\{ba236449-a015-40aa-af22-e5c237f7b606\}\s*$')) {
+            if ($identity -notmatch $line) { throw 'Built identity mismatch; no launch performed' }
+          }
+          $profile = Join-Path $env:RUNNER_TEMP ("cfh-profile-" + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $profile | Out-Null
+          $saved = @(Get-NetFirewallProfile | Select-Object Name, Enabled, DefaultOutboundAction)
+          if ($saved.Count -ne 3 -or @($saved | Where-Object { -not $_.Enabled }).Count -ne 0) { throw 'Firewall profiles not all enabled; no launch performed' }
+          $proc = $null
+          $ruleName = 'CFHMailEvaluation-' + [guid]::NewGuid().ToString('N')
+          try {
+            New-NetFirewallRule -Name $ruleName -Direction Outbound -Action Block -Program $exe -Profile Any | Out-Null
+            Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultOutboundAction Block
+            $actual = @(Get-NetFirewallProfile)
+            if ($actual.Count -ne 3 -or @($actual | Where-Object { -not $_.Enabled -or $_.DefaultOutboundAction -ne 'Block' }).Count -ne 0) { throw 'Outbound block could not be established; no launch performed' }
+            $proc = Start-Process -FilePath $exe -ArgumentList @('-no-remote','-profile',('"' + $profile + '"')) -PassThru
+            Start-Sleep -Seconds 25
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "Application exited during startup: $($proc.ExitCode)" }
+            $files = @(Get-ChildItem -LiteralPath $profile -Force)
+            if ($files.Count -eq 0) { throw 'Explicit fresh profile remained empty' }
+            Write-Host "Fresh-profile startup observed for process $($proc.Id); profile entries: $($files.Count). No accounts or messages were used."
+          } finally {
+            if ($null -ne $proc) {
+              $proc.Refresh()
+              if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+            }
+            Remove-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+            foreach ($item in $saved) { Set-NetFirewallProfile -Name $item.Name -DefaultOutboundAction $item.DefaultOutboundAction }
+          }
+          Write-Host 'Disposable runner startup check only; network isolation and packaged installer were not independently verified.'
