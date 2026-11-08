@@ -1,0 +1,34 @@
+name: CFH Mail isolated toolchain probe
+on:
+  push:
+    branches: [cfh-mail-branding-eval]
+    paths: [.github/workflows/cfh-mail-toolchain-probe.yml]
+permissions: {}
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Fetch and authenticate MozillaBuild 4.2.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          Invoke-WebRequest -Uri 'https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.2.1.exe' -OutFile $file -TimeoutSec 300
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+          if ($hash -ne '8ef5b3d2087e4867dc75bf19f5e62f12e917f518239415723cc70896b6f1e3d8') { throw 'MozillaBuild hash differs from reviewed input' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $file
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?i)Mozilla Corporation') { throw 'MozillaBuild signature validation failed' }
+          Write-Host "Verified MozillaBuild SHA-256 $hash"
+      - name: Install on disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          $p = Start-Process -FilePath $file -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer exited $($p.ExitCode)" }
+          if (-not (Test-Path 'C:\mozilla-build\start-shell.bat')) { throw 'MozillaBuild shell missing' }
+          if (-not (Test-Path 'C:\mozilla-build\msys2\usr\bin\bash.exe')) { throw 'MozillaBuild Bash missing' }
+          Write-Host 'MozillaBuild installation confirmed on disposable runner only.'
+          & 'C:\mozilla-build\msys2\usr\bin\bash.exe' --version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw 'Bash check failed' }
