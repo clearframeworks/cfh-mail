@@ -1,0 +1,7 @@
+# CFH Mail evaluation only. No updater or public distribution is configured.
+# The exact expected identity must be checked in application.ini/config.status
+# before launching. Never use an existing Thunderbird profile for tests.
+ac_add_options --enable-project=comm/mail
+ac_add_options --with-branding=comm/mail/branding/cfh
+ac_add_options --disable-updater
+mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-cfh-mail

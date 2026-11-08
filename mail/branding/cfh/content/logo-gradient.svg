@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="CFH Mail">
+ <rect x="3" y="3" width="122" height="122" rx="31" fill="#073c66"/>
+ <path d="M22 36h75v51H22z" fill="#fff"/>
+ <path d="m24 40 35 26 35-26" fill="none" stroke="#073c66" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+ <path d="M69 66h38v34H69z" fill="#57d3bb"/>
+ <path d="M69 76h38M78 61v10M98 61v10" fill="none" stroke="#073c66" stroke-width="5" stroke-linecap="round"/>
+ <path d="M79 84h5m8 0h5m-18 8h5m8 0h5" stroke="#073c66" stroke-width="5" stroke-linecap="round"/>
+</svg>
