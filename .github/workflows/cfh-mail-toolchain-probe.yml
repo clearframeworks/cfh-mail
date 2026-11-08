@@ -32,7 +32,8 @@ jobs:
           Write-Host 'MozillaBuild installation confirmed on disposable runner only.'
           $bashVersion = & 'C:\mozilla-build\msys2\usr\bin\bash.exe' --version
           Write-Host $bashVersion[0]
-          if ($LASTEXITCODE -ne 0) { throw 'Bash check failed' }      - name: Inspect shell bootstrap configuration
+          if ($LASTEXITCODE -ne 0) { throw 'Bash check failed' }
+      - name: Inspect shell bootstrap configuration
         shell: pwsh
         run: |
           Get-Content 'C:\mozilla-build\start-shell.bat' | Select-String -Pattern 'MOZILLABUILD|PATH|bash|SHELL|STARTUP' -Context 0,1
