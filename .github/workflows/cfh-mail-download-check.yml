@@ -1,0 +1,16 @@
+name: CFH Mail remote download check
+on:
+  push:
+    branches: [cfh-mail-branding-eval]
+    paths: [.github/workflows/cfh-mail-download-check.yml]
+permissions: {}
+jobs:
+  head:
+    runs-on: windows-2022
+    timeout-minutes: 4
+    steps:
+      - name: Check Mozilla archive connection
+        shell: pwsh
+        run: |
+          curl.exe --head --fail --location --max-time 30 --silent --show-error --write-out "status=%{http_code} bytes=%{size_download} time=%{time_total}`n" 'https://archive.mozilla.org/pub/thunderbird/releases/159.0/source/thunderbird-159.0.source.tar.xz'
+          if ($LASTEXITCODE -ne 0) { throw 'Mozilla source HEAD failed' }
