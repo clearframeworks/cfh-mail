@@ -60,7 +60,8 @@ imply_option("MOZ_PLACES", True)
 imply_option("MOZ_SERVICES_HEALTHREPORT", True)
 imply_option("MOZ_DEDICATED_PROFILES", True)
 imply_option("MOZ_BLOCK_PROFILE_DOWNGRADE", True)
-imply_option("MOZ_PROFILE_MIGRATOR", True)
+# CFH evaluation must not import existing Thunderbird profiles automatically.
+imply_option("MOZ_PROFILE_MIGRATOR", False)
 
 with only_when(target_has_linux_kernel & compile_environment):
     option(env="MOZ_NO_PIE_COMPAT", help="Enable non-PIE wrapper")
