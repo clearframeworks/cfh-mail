@@ -30,5 +30,6 @@ jobs:
           if (-not (Test-Path 'C:\mozilla-build\start-shell.bat')) { throw 'MozillaBuild shell missing' }
           if (-not (Test-Path 'C:\mozilla-build\msys2\usr\bin\bash.exe')) { throw 'MozillaBuild Bash missing' }
           Write-Host 'MozillaBuild installation confirmed on disposable runner only.'
-          & 'C:\mozilla-build\msys2\usr\bin\bash.exe' --version | Select-Object -First 1
+          $bashVersion = & 'C:\mozilla-build\msys2\usr\bin\bash.exe' --version
+          Write-Host $bashVersion[0]
           if ($LASTEXITCODE -ne 0) { throw 'Bash check failed' }
