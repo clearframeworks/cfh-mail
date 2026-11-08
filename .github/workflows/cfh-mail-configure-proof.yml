@@ -21,12 +21,25 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = Join-Path $env:RUNNER_TEMP 'mb.exe'
+          $installer = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
           curl.exe --fail --location --retry 2 -o $installer 'https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.2.1.exe'
           if ($LASTEXITCODE -ne 0 -or (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8ef5b3d2087e4867dc75bf19f5e62f12e917f518239415723cc70896b6f1e3d8') { throw 'MozillaBuild checksum mismatch' }
+      - name: Validate MozillaBuild signature
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
           $sig = Get-AuthenticodeSignature $installer
           if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Mozilla Corporation') { throw 'MozillaBuild signature mismatch' }
-          $p = Start-Process $installer -ArgumentList '/S' -PassThru -Wait
+      - name: Install verified MozillaBuild
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          $p = Start-Process $installer -ArgumentList '/S' -PassThru
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; throw 'MozillaBuild installer exceeded 3 minutes' }
           if ($p.ExitCode -ne 0) { throw 'MozillaBuild install failed' }
       - name: Extract verified source archive
         shell: pwsh
