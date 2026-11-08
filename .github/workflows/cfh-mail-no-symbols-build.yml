@@ -94,7 +94,7 @@ jobs:
             if ($actual -ne $item.sha) { throw "Git blob mismatch: $($item.path)" }
           }
           Write-Host "Verified candidate overlay files: $($items.Count)"
-          Add-Content -LiteralPath (Join-Path $env:SOURCE_ROOT 'comm\cfh-build\mozconfig') -Value 'ac_add_options --disable-debug-symbols'
+          Add-Content -LiteralPath (Join-Path $env:SOURCE_ROOT 'comm\cfh-build\mozconfig') -Value "`nac_add_options --disable-debug-symbols"
           Write-Host 'Experiment configuration adds --disable-debug-symbols after verifying original overlay.'
       - name: Bootstrap and configure only
         shell: pwsh
