@@ -144,7 +144,7 @@ jobs:
           Write-Host "MOZ_RUST_DEFAULT_FLAGS=$rustflags"
           Write-Host 'Configure checks only: no binary launched, no existing profile opened, no accounts or email used.'
       - name: Build and package evaluation on disposable runner
-        timeout-minutes: 300
+        timeout-minutes: 330
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -156,7 +156,7 @@ jobs:
           export MOZCONFIG="`$PWD/comm/cfh-build/mozconfig"
           export MOZBUILD_STATE_PATH=/d/mozbuild-cfh
           export CARGO_BUILD_JOBS=1
-          ./mach build -j1
+          ./mach build -j2
           ./mach package
           touch /d/cfh-build-complete
           "@
@@ -182,7 +182,7 @@ jobs:
           Copy-Item (Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\config.status.json') (Join-Path $out 'config.status.json')
           foreach ($p in $packages) { Copy-Item $p.FullName $out }
           $records = @(Get-ChildItem $out -File | ForEach-Object { [ordered]@{name=$_.Name; bytes=$_.Length; sha256=(Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()} })
-          $provenance = [ordered]@{classification='Private unreleased evaluation; no secure update service'; upstreamRelease='Thunderbird 159.0'; signedReleaseTarSha256='b4cbc4e010deaa66a51a5c647586c8dc41579c136155fe8baa8253f7c8b3927e'; platformGit='9a2dc53c369c7ae5172018b35988e1d2ffeff402'; commGit='f88f34886f667703f55095f2ede6f31b15b42116'; cfhOverlayGit='6e016670a8565fb2337910872b3c5b482b58be81'; githubRun=$env:GITHUB_RUN_ID; gitToTarWholeTreeComparison='not performed'; bootstrapToolchainHashes='not fully inventoried'; buildConfiguration='original overlay plus --disable-debug-symbols'; buildConcurrency=1; runtimeLaunch='not performed'; files=$records}
+          $provenance = [ordered]@{classification='Private unreleased evaluation; no secure update service'; upstreamRelease='Thunderbird 159.0'; signedReleaseTarSha256='b4cbc4e010deaa66a51a5c647586c8dc41579c136155fe8baa8253f7c8b3927e'; platformGit='9a2dc53c369c7ae5172018b35988e1d2ffeff402'; commGit='f88f34886f667703f55095f2ede6f31b15b42116'; cfhOverlayGit='6e016670a8565fb2337910872b3c5b482b58be81'; githubRun=$env:GITHUB_RUN_ID; gitToTarWholeTreeComparison='not performed'; bootstrapToolchainHashes='not fully inventoried'; buildConfiguration='original overlay plus --disable-debug-symbols'; buildConcurrency=2; cargoConcurrency=1; runtimeLaunch='not performed'; files=$records}
           $provenance | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $out 'provenance.json')
           Write-Host ($provenance | ConvertTo-Json -Depth 8 -Compress)
           Write-Host 'Build artifacts remain only on this temporary runner and are not uploaded.'
