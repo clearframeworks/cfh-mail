@@ -30,7 +30,7 @@ jobs:
           with tarfile.open(path, mode='r|xz') as archive:
               for item in archive:
                   members += 1
-                  if members > 500000:
+                  if members > 2000000:
                       raise SystemExit('Archive member limit exceeded')
                   if not item.isfile():
                       continue
