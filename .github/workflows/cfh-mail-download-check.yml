@@ -14,3 +14,8 @@ jobs:
         run: |
           curl.exe --head --fail --location --max-time 30 --silent --show-error --write-out "status=%{http_code} bytes=%{size_download} time=%{time_total}`n" 'https://archive.mozilla.org/pub/thunderbird/releases/159.0/source/thunderbird-159.0.source.tar.xz'
           if ($LASTEXITCODE -ne 0) { throw 'Mozilla source HEAD failed' }
+      - name: Measure a bounded source transfer
+        shell: pwsh
+        run: |
+          curl.exe --fail --location --range 0-10485759 --max-filesize 10485760 --max-time 60 --silent --show-error --output NUL --write-out "status=%{http_code} bytes=%{size_download} seconds=%{time_total}`n" 'https://archive.mozilla.org/pub/thunderbird/releases/159.0/source/thunderbird-159.0.source.tar.xz'
+          if ($LASTEXITCODE -ne 0) { throw "Bounded range transfer failed: $LASTEXITCODE" }
