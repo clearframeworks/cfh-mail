@@ -99,9 +99,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $dest = Join-Path $env:SOURCE_ROOT 'comm\mailnews\imap\test\unit\test_cfh_local_mailbox.js'
-          $url = 'https://raw.githubusercontent.com/clearframeworks/cfh-mail/5c663803ad00e1d07b91e139c0e4a806b90d75ca/cfh-build/tests/test_cfh_local_mailbox.js'
+          $url = 'https://raw.githubusercontent.com/clearframeworks/cfh-mail/19f43bc9994fd687375a4bf20492f9f74258186b/cfh-build/tests/test_cfh_local_mailbox.js'
           Invoke-WebRequest -Uri $url -OutFile $dest
-          if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'ad07a8b0f5a444422bc9b2b5a62562dc1932d11ed96cbdf7edd0da61f552d0f7') { throw 'CFH test hash mismatch' }
+          if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'f635b070d1d5c3e50d85dc5d1558079318ce37d1e55183b8d4d0f839d9dca3bf') { throw 'CFH test hash mismatch' }
           Add-Content -LiteralPath (Join-Path $env:SOURCE_ROOT 'comm\mailnews\imap\test\unit\xpcshell-shared.toml') -Value "`n[`"test_cfh_local_mailbox.js`"]`n"
       - name: Bootstrap and configure only
         shell: pwsh
