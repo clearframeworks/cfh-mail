@@ -1,0 +1,54 @@
+name: CFH Mail verified source inventory
+on:
+  push:
+    branches: [cfh-mail-branding-eval]
+    paths: [.github/workflows/cfh-mail-source-inventory.yml]
+permissions: {}
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download exact Mozilla release source to remote runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/thunderbird-159.0.source.tar.xz"
+          curl --fail --silent --show-error --location --max-filesize 1200000000 --max-time 900 --retry 2 https://archive.mozilla.org/pub/thunderbird/releases/159.0/source/thunderbird-159.0.source.tar.xz -o "$archive"
+          echo 'b4cbc4e010deaa66a51a5c647586c8dc41579c136155fe8baa8253f7c8b3927e  '"$archive" | sha256sum --check --strict
+          du -h "$archive"
+      - name: Inspect archive as data without extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, tarfile, hashlib
+          path = os.path.join(os.environ['RUNNER_TEMP'], 'thunderbird-159.0.source.tar.xz')
+          wanted = ('comm/.gecko_rev.yml', 'comm/mail/moz.configure', 'comm/mail/app/profile/all-thunderbird.js')
+          hits = {}
+          members = 0
+          with tarfile.open(path, mode='r|xz') as archive:
+              for item in archive:
+                  members += 1
+                  if members > 500000:
+                      raise SystemExit('Archive member limit exceeded')
+                  if not item.isfile():
+                      continue
+                  for target in wanted:
+                      if item.name.endswith('/' + target):
+                          if target in hits or item.size > 4 * 1024 * 1024:
+                              raise SystemExit('Duplicate or oversized inventory target: ' + target)
+                          f = archive.extractfile(item)
+                          data = f.read(item.size + 1)
+                          if len(data) != item.size:
+                              raise SystemExit('Incomplete target: ' + target)
+                          hits[target] = (len(data), hashlib.sha256(data).hexdigest(), data)
+          if set(hits) != set(wanted):
+              raise SystemExit('Required archive inventory target missing: ' + repr(set(wanted)-set(hits)))
+          rev = hits['comm/.gecko_rev.yml'][2].decode('utf-8')
+          if '5add844c26613d7e4d84c799d6e23cf987b1240d' not in rev or 'FIREFOX_159_0_BUILD1' not in rev:
+              raise SystemExit('Archive Gecko binding differs from reviewed release')
+          for name, (size, digest, _) in hits.items():
+              print(f'{name}: bytes={size} sha256={digest}')
+          print(f'Archive members inventoried: {members}; no source was extracted or executed.')
+          PY
