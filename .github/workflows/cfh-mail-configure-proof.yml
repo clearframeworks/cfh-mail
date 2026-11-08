@@ -17,6 +17,10 @@ jobs:
           curl.exe --fail --location --retry 2 --max-time 1200 -o $archive 'https://archive.mozilla.org/pub/thunderbird/releases/159.0/source/thunderbird-159.0.source.tar.xz'
           if ($LASTEXITCODE -ne 0) { throw 'Source download failed' }
           if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b4cbc4e010deaa66a51a5c647586c8dc41579c136155fe8baa8253f7c8b3927e') { throw 'Source checksum mismatch' }
+      - name: Verify and install MozillaBuild on disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
           $installer = Join-Path $env:RUNNER_TEMP 'mb.exe'
           curl.exe --fail --location --retry 2 -o $installer 'https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.2.1.exe'
           if ($LASTEXITCODE -ne 0 -or (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8ef5b3d2087e4867dc75bf19f5e62f12e917f518239415723cc70896b6f1e3d8') { throw 'MozillaBuild checksum mismatch' }
@@ -24,6 +28,11 @@ jobs:
           if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Mozilla Corporation') { throw 'MozillaBuild signature mismatch' }
           $p = Start-Process $installer -ArgumentList '/S' -PassThru -Wait
           if ($p.ExitCode -ne 0) { throw 'MozillaBuild install failed' }
+      - name: Extract verified source archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = 'D:\tb-source.tar.xz'
           New-Item -ItemType Directory -Path D:\src | Out-Null
           tar.exe -xJf $archive -C D:\src
           if ($LASTEXITCODE -ne 0) { throw 'Source extraction failed' }
@@ -73,12 +82,25 @@ jobs:
           & 'C:\mozilla-build\start-shell.bat' -c 'bash /d/cfh-configure.sh'
           if ($LASTEXITCODE -ne 0) { throw "Bootstrap/configure failed: $LASTEXITCODE" }
           Write-Host 'Configure completed; no application executable was launched.'
-      - name: Inspect generated settings, fail closed
+      - name: Check generated identity and disablement; do not launch
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $status = Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\config.status'
-          if (-not (Test-Path $status)) { throw 'Generated config.status missing' }
-          $data = Get-Content $status -Raw
-          foreach ($pattern in @('cfhmail','CFHMail','ba236449-a015-40aa-af22-e5c237f7b606')) { if ($data -notmatch [regex]::Escape($pattern)) { throw "Missing identity setting: $pattern" } }
-          Write-Host 'Identity strings present; detailed boolean/profile proof is still required before any executable launch.'
+          $path = Join-Path $env:SOURCE_ROOT 'obj-cfh-mail\config.status.json'
+          if (-not (Test-Path $path)) { throw 'Generated config.status.json missing' }
+          $config = Get-Content $path -Raw | ConvertFrom-Json
+          $sub = $config.substs
+          $expected = @{ OS_TARGET='WINNT'; MOZ_APP_NAME='cfhmail'; MOZ_APP_BASENAME='CFHMail'; MOZ_APP_PROFILE='CFHMail'; MOZ_APP_VENDOR='CFH'; MOZ_APP_ID='{ba236449-a015-40aa-af22-e5c237f7b606}'; MOZ_APPUPDATE_HOST='updates.invalid' }
+          foreach ($key in $expected.Keys) {
+            $actual = $sub.$key
+            if ($actual -cne $expected[$key]) { throw "Generated $key is '$actual'; expected '$($expected[$key])'" }
+            Write-Host "$key=$actual"
+          }
+          foreach ($key in @('MOZ_ENTERPRISE','MOZ_UPDATER','MOZ_PROFILE_MIGRATOR')) {
+            foreach ($area in @($config.substs,$config.defines)) {
+              $v = $area.$key
+              if ($null -ne $v -and $v -ne '' -and $v -ne 0 -and $v -ne $false) { throw "$key was enabled in generated configuration" }
+            }
+            Write-Host "$key absent or disabled in generated config and defines"
+          }
+          Write-Host 'Configure checks only: no binary launched, no existing profile opened, no accounts or email used.'
