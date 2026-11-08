@@ -1,0 +1,41 @@
+name: CFH Mail upstream input verification
+on:
+  push:
+    branches: [cfh-mail-159]
+    paths: [.github/workflows/cfh-mail-inputs.yml]
+permissions: {}
+jobs:
+  source-checksum:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Verify Mozilla signed checksum manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/gnupg"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          curl --fail --silent --show-error --location --max-time 45 https://archive.mozilla.org/pub/thunderbird/releases/159.0/KEY -o "$RUNNER_TEMP/key"
+          curl --fail --silent --show-error --location --max-time 45 https://archive.mozilla.org/pub/thunderbird/releases/159.0/SHA256SUMS -o "$RUNNER_TEMP/sums"
+          curl --fail --silent --show-error --location --max-time 45 https://archive.mozilla.org/pub/thunderbird/releases/159.0/SHA256SUMS.asc -o "$RUNNER_TEMP/sums.asc"
+          gpg --batch --import "$RUNNER_TEMP/key"
+          gpg --batch --status-fd 1 --verify "$RUNNER_TEMP/sums.asc" "$RUNNER_TEMP/sums" > "$RUNNER_TEMP/gpg-status"
+          grep -F '[GNUPG:] VALIDSIG 827E658608679618CD349F93678E455D76767AA3 ' "$RUNNER_TEMP/gpg-status"
+          grep -F 'source/thunderbird-159.0.source.tar.xz' "$RUNNER_TEMP/sums"
+  build-tools:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Verify MozillaBuild installer signature
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = Join-Path $env:RUNNER_TEMP 'MozillaBuildSetup-4.2.1.exe'
+          Invoke-WebRequest -Uri 'https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.2.1.exe' -OutFile $file -TimeoutSec 300
+          $s = Get-AuthenticodeSignature -LiteralPath $file
+          Write-Host "Signature status: $($s.Status)"
+          if ($null -eq $s.SignerCertificate) { throw 'No installer signer certificate' }
+          Write-Host "Signer: $($s.SignerCertificate.Subject)"
+          Write-Host "SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash)"
+          if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch '(?i)Mozilla') { throw 'Installer signature did not validate to Mozilla' }
+          Write-Host 'Installer was not executed.'
