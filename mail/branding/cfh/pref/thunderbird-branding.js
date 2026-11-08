@@ -7,3 +7,6 @@ pref("mailnews.start_page.enabled", false);
 pref("mailnews.start_page.url", "about:blank");
 pref("mail.inappnotifications.enabled", false);
 pref("mail.inappnotifications.url", "");
+// Evaluation defaults only: actual packaged behavior still requires network testing.
+pref("datareporting.healthreport.uploadEnabled", false);
+pref("toolkit.telemetry.enabled", false);
