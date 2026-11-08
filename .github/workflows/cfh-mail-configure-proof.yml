@@ -41,18 +41,35 @@ jobs:
           $p = Start-Process $installer -ArgumentList '/S' -PassThru
           if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; throw 'MozillaBuild installer exceeded 3 minutes' }
           if ($p.ExitCode -ne 0) { throw 'MozillaBuild install failed' }
-      - name: Extract verified source archive
+      - name: Check out exact official platform and mail revisions
+        timeout-minutes: 60
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $archive = 'D:\tb-source.tar.xz'
-          New-Item -ItemType Directory -Path D:\src | Out-Null
-          tar.exe -xJf $archive -C D:\src
-          if ($LASTEXITCODE -ne 0) { throw 'Source extraction failed' }
-          Remove-Item $archive
-          $root = @(Get-ChildItem D:\src -Directory)
-          if ($root.Count -ne 1 -or -not (Test-Path (Join-Path $root[0].FullName 'mach'))) { throw 'Unexpected archive layout' }
-          "SOURCE_ROOT=$($root[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $env:GIT_TERMINAL_PROMPT = '0'
+          $platform = '9a2dc53c369c7ae5172018b35988e1d2ffeff402'
+          $comm = 'f88f34886f667703f55095f2ede6f31b15b42116'
+          $root = 'D:\src'
+          git init -q $root
+          if ($LASTEXITCODE -ne 0) { throw 'Platform git init failed' }
+          git -C $root config core.longpaths true
+          git -C $root fetch --no-tags --depth=1 https://github.com/mozilla-firefox/firefox.git $platform
+          if ($LASTEXITCODE -ne 0) { throw 'Platform fetch failed' }
+          git -C $root checkout --quiet --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0 -or (git -C $root rev-parse HEAD) -cne $platform) { throw 'Platform revision mismatch' }
+          $commdir = Join-Path $root 'comm'
+          git init -q $commdir
+          if ($LASTEXITCODE -ne 0) { throw 'Mail git init failed' }
+          git -C $commdir config core.longpaths true
+          git -C $commdir fetch --no-tags --depth=1 https://github.com/thunderbird/thunderbird-desktop.git $comm
+          if ($LASTEXITCODE -ne 0) { throw 'Mail fetch failed' }
+          git -C $commdir checkout --quiet --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0 -or (git -C $commdir rev-parse HEAD) -cne $comm) { throw 'Mail revision mismatch' }
+          $rev = Get-Content (Join-Path $commdir '.gecko_rev.yml') -Raw
+          if ($rev -notmatch '5add844c26613d7e4d84c799d6e23cf987b1240d' -or $rev -notmatch 'FIREFOX_159_0_BUILD1') { throw 'Thunderbird Gecko source binding mismatch' }
+          Write-Host "Exact official Git revisions: platform=$platform comm=$comm"
+          Write-Host 'The independently verified release tarball identifies the same platform tag; whole-tree byte comparison is not asserted.'
+          "SOURCE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Overlay pinned CFH candidate with git blob verification
         shell: pwsh
         run: |
